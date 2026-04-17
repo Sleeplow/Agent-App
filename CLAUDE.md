@@ -1,7 +1,7 @@
 # Agent-App — Instructions Claude
 
 ## Stack
-React 18 + Vite · GitHub Pages (`/Agent-App/`) · Anthropic API (browser direct)
+React 18 + Vite · PWA (vite-plugin-pwa) · GitHub Pages (`/Agent-App/`) · Anthropic API (browser direct)
 
 ---
 
@@ -119,8 +119,42 @@ pages branch    →  gh-pages  (gérée automatiquement par l'Action)
 ```
 
 - Toujours développer sur une branche feature, jamais directement sur `main`
-- Merge dans `main` uniquement après validation des 4 règles ci-dessus
+- Merge dans `main` uniquement après validation des 5 règles ci-dessus
 - Message de commit : `type: description courte` (feat / fix / refactor / docs / chore)
+
+---
+
+## Règle 5 — Conformité PWA (obligatoire)
+
+Cette app est une **Progressive Web App** installable sur iPhone et Android. Toute modification doit respecter ces contraintes :
+
+**Manifest & icônes**
+- [ ] `vite.config.js` contient la config `VitePWA` avec `manifest` complet (`name`, `short_name`, `theme_color`, `background_color`, `display: standalone`, `start_url`, `scope`)
+- [ ] Les icônes PNG existent dans `public/` : `pwa-64x64.png`, `pwa-192x192.png`, `pwa-512x512.png`, `maskable-icon-512x512.png`, `apple-touch-icon-180x180.png`
+- [ ] Si l'icône source (`public/icon.svg`) est modifiée, régénérer les PNG : `npx @vite-pwa/assets-generator --preset minimal public/icon.svg`
+
+**index.html**
+- [ ] `<meta name="viewport">` contient `viewport-fit=cover`
+- [ ] `<meta name="apple-mobile-web-app-capable" content="yes">` présent
+- [ ] `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">` présent
+- [ ] `<meta name="apple-mobile-web-app-title">` présent
+- [ ] `<link rel="apple-touch-icon">` pointe vers `apple-touch-icon-180x180.png`
+- [ ] `<meta name="theme-color">` présent
+
+**CSS Safe areas**
+- [ ] `#root` utilise `env(safe-area-inset-*)` pour respecter l'encoche/Dynamic Island/home indicator iPhone
+- [ ] `min-height: 100dvh` utilisé (pas seulement `100vh`) pour éviter les bugs iOS Safari
+- [ ] `-webkit-tap-highlight-color: transparent` pour supprimer le flash bleu au tap
+
+**Service Worker**
+- [ ] Le build produit `dist/sw.js` et `dist/workbox-*.js`
+- [ ] `registerType: "autoUpdate"` pour que l'app se mette à jour automatiquement
+
+**Test mobile avant merge**
+- [ ] Tester sur iOS Safari (vérifier que "Ajouter à l'écran d'accueil" fonctionne)
+- [ ] Tester sur Android Chrome (bannière d'installation PWA)
+- [ ] Vérifier que le mode standalone masque la barre du navigateur
+- [ ] Vérifier que le contenu ne passe pas sous l'encoche
 
 ---
 

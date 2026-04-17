@@ -424,6 +424,7 @@ const styles = {
   root: {
     background: "#0d0d1a",
     minHeight: "100vh",
+    minHeight: "100dvh",
     color: "#e0e0e0",
     fontFamily: "'Courier New', monospace",
     padding: "0 0 40px 0",
@@ -647,6 +648,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
   outline: 2px solid #f0a500;
   outline-offset: 2px;
 }
+/* Safe area — encoche iPhone / Dynamic Island / home indicator */
+#root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+/* Tap highlight supprimé sur mobile */
+* { -webkit-tap-highlight-color: transparent; }
+/* Sélection de texte désactivée sur les éléments UI */
+button, .agent-bubble { -webkit-user-select: none; user-select: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -2,7 +2,27 @@
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- PWA viewport avec support safe area (encoche / Dynamic Island / home indicator) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Favicon & icônes -->
+    <link rel="icon" href="/Agent-App/favicon.ico" sizes="any" />
+    <link rel="icon" href="/Agent-App/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/Agent-App/apple-touch-icon-180x180.png" />
+
+    <!-- iOS PWA — mode standalone (sans barre Safari) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AgentAI" />
+
+    <!-- Android / général -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#f0a500" />
+    <meta name="application-name" content="AgentAI" />
+
+    <!-- SEO / partage -->
+    <meta name="description" content="Pipeline multi-agents Claude : Orchestrator → Dev → QA" />
+
     <title>Agent Pipeline — Orchestrator · Dev · QA</title>
   </head>
   <body>
