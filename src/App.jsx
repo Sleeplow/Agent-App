@@ -209,6 +209,8 @@ export default function AgentPipeline() {
         <button
           style={styles.configToggle}
           onClick={() => setShowConfig(!showConfig)}
+          aria-label={showConfig ? "Réduire la configuration" : "Ouvrir la configuration"}
+          aria-expanded={showConfig}
         >
           {showConfig ? "↑ Réduire" : "⚙ Config"}
         </button>
@@ -219,13 +221,18 @@ export default function AgentPipeline() {
         <div style={styles.configPanel}>
           <div style={styles.configGrid}>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>🔑 Clé API Anthropic</label>
+              <label htmlFor="api-key" style={styles.label}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight:6,verticalAlign:'middle'}}><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                Clé API Anthropic
+              </label>
               <input
+                id="api-key"
                 type="password"
                 placeholder="sk-ant-api03-..."
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 style={styles.input}
+                aria-label="Clé API Anthropic"
               />
             </div>
           </div>
@@ -254,17 +261,24 @@ export default function AgentPipeline() {
 
       {/* Brief */}
       <div style={styles.briefSection}>
-        <label style={styles.label}>📋 Brief du projet</label>
+        <label htmlFor="project-brief" style={styles.label}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight:6,verticalAlign:'middle'}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Brief du projet
+        </label>
         <textarea
+          id="project-brief"
           placeholder="Ex: Crée-moi une web-app simple de calculateur de pricing pour des mandats Power BI..."
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
           style={styles.textarea}
           rows={4}
+          aria-label="Brief du projet"
         />
         <button
           onClick={runPipeline}
           disabled={!isReady || phase === "running"}
+          aria-label={phase === "running" ? "Pipeline en cours d'exécution" : "Lancer le pipeline"}
+          aria-busy={phase === "running"}
           style={{
             ...styles.runBtn,
             opacity: !isReady || phase === "running" ? 0.4 : 1,
@@ -295,11 +309,14 @@ export default function AgentPipeline() {
                       : isDone
                       ? `${agent.color}15`
                       : "#1a1a2e",
-                    boxShadow: isActive
-                      ? `0 0 20px ${agent.color}66`
-                      : "none",
+                    boxShadow: isActive ? `0 0 20px ${agent.color}66` : "none",
+                    cursor: isDone ? "pointer" : "default",
                   }}
                   onClick={() => isDone && setActiveTab(agent.key)}
+                  role={isDone ? "button" : undefined}
+                  tabIndex={isDone ? 0 : undefined}
+                  aria-label={isDone ? `Voir les résultats de ${agent.label}` : agent.label}
+                  onKeyDown={(e) => e.key === "Enter" && isDone && setActiveTab(agent.key)}
                   className={isActive ? "pulse-border" : ""}
                 >
                   <span style={{ ...styles.agentIcon, color: agent.color }}>
@@ -336,6 +353,9 @@ export default function AgentPipeline() {
               <button
                 key={a.key}
                 onClick={() => setActiveTab(a.key)}
+                aria-label={`Résultats de ${a.label}`}
+                aria-selected={activeTab === a.key}
+                role="tab"
                 style={{
                   ...styles.tab,
                   borderBottom:
@@ -366,13 +386,19 @@ export default function AgentPipeline() {
 
       {/* Error */}
       {results.error && (
-        <div style={styles.errorBox}>⚠ {results.error}</div>
+        <div style={styles.errorBox} role="alert">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight:6,verticalAlign:'middle',flexShrink:0}}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          {results.error}
+        </div>
       )}
 
       {/* Done */}
       {phase === "done" && (
-        <div style={styles.doneBar}>
-          ✅ Pipeline complété — 3 agents ont collaboré avec succès !
+        <div style={styles.doneBar} role="status">
+          <span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight:6,verticalAlign:'middle',color:'#81c784'}}><polyline points="20 6 9 17 4 12"/></svg>
+            Pipeline complété — 3 agents ont collaboré avec succès !
+          </span>
           <button
             onClick={() => {
               setPhase("idle");
@@ -381,6 +407,7 @@ export default function AgentPipeline() {
               setShowConfig(true);
               setBrief("");
             }}
+            aria-label="Démarrer un nouveau brief"
             style={styles.resetBtn}
           >
             Nouveau brief
@@ -422,11 +449,12 @@ const styles = {
     background: "transparent",
     border: "1px solid #2a2a4a",
     color: "#888",
-    padding: "6px 14px",
+    padding: "10px 14px",
     borderRadius: 4,
     cursor: "pointer",
     fontSize: 12,
     letterSpacing: 1,
+    minHeight: 44,
   },
   configPanel: {
     padding: "20px 24px",
@@ -543,11 +571,12 @@ const styles = {
   tab: {
     background: "transparent",
     border: "none",
-    padding: "10px 18px",
+    padding: "12px 18px",
     cursor: "pointer",
     fontSize: 12,
     letterSpacing: 1,
-    transition: "all 0.2s",
+    transition: "color 200ms ease",
+    minHeight: 44,
   },
   resultBox: {
     background: "#0f0f22",
@@ -596,11 +625,12 @@ const styles = {
     background: "#1a3a1a",
     border: "1px solid #2a4a2a",
     color: "#81c784",
-    padding: "6px 16px",
+    padding: "10px 16px",
     borderRadius: 4,
     cursor: "pointer",
     fontSize: 12,
     whiteSpace: "nowrap",
+    minHeight: 44,
   },
 };
 
@@ -613,4 +643,15 @@ const css = `
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #0d0d1a; }
 ::-webkit-scrollbar-thumb { background: #2a2a4a; border-radius: 3px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid #f0a500;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 `;
