@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0d0d1a" rx="80"/>
+  <!-- Outer hexagon -->
+  <polygon points="256,52 432,156 432,356 256,460 80,356 80,156"
+    fill="none" stroke="#f0a500" stroke-width="14" stroke-linejoin="round"/>
+  <!-- Inner hexagon -->
+  <polygon points="256,120 370,184 370,328 256,392 142,328 142,184"
+    fill="none" stroke="#f0a50044" stroke-width="6" stroke-linejoin="round"/>
+  <!-- Connector dots — Orchestrator -->
+  <circle cx="256" cy="52"  r="10" fill="#f0a500"/>
+  <circle cx="432" cy="156" r="10" fill="#4fc3f7"/>
+  <circle cx="432" cy="356" r="10" fill="#81c784"/>
+  <circle cx="256" cy="460" r="10" fill="#81c784"/>
+  <circle cx="80"  cy="356" r="10" fill="#4fc3f7"/>
+  <circle cx="80"  cy="156" r="10" fill="#f0a500"/>
+  <!-- Pipeline arrows (center) -->
+  <line x1="180" y1="256" x2="222" y2="256" stroke="#f0a500" stroke-width="6" stroke-linecap="round"/>
+  <line x1="290" y1="256" x2="332" y2="256" stroke="#4fc3f7" stroke-width="6" stroke-linecap="round"/>
+  <!-- Agent nodes -->
+  <circle cx="160" cy="256" r="20" fill="#f0a50022" stroke="#f0a500" stroke-width="4"/>
+  <circle cx="256" cy="256" r="20" fill="#4fc3f722" stroke="#4fc3f7" stroke-width="4"/>
+  <circle cx="352" cy="256" r="20" fill="#81c78422" stroke="#81c784" stroke-width="4"/>
+  <!-- Agent icons -->
+  <text x="160" y="263" font-family="monospace" font-size="18" fill="#f0a500" text-anchor="middle">◈</text>
+  <text x="256" y="263" font-family="monospace" font-size="18" fill="#4fc3f7" text-anchor="middle">⌥</text>
+  <text x="352" y="263" font-family="monospace" font-size="18" fill="#81c784" text-anchor="middle">◉</text>
+</svg>
