@@ -85,44 +85,47 @@ function TypewriterText({ text, speed = 8 }) {
 }
 
 export default function AgentPipeline() {
-  const [apiKey, setApiKey] = useState(
-    () => localStorage.getItem("anthropic_api_key") || ""
-  );
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("anthropic_api_key") || "");
   const [agentIds, setAgentIds] = useState(() => {
-    try {
-      return (
-        JSON.parse(localStorage.getItem("agent_ids")) || {
-          orchestrator: "",
-          dev: "",
-          qa: "",
-        }
-      );
-    } catch {
-      return { orchestrator: "", dev: "", qa: "" };
-    }
+    try { return JSON.parse(localStorage.getItem("agent_ids")) || { orchestrator: "", dev: "", qa: "" }; }
+    catch { return { orchestrator: "", dev: "", qa: "" }; }
   });
   const [brief, setBrief] = useState("");
-  const [results, setResults] = useState({});
+  const [results, setResults] = useState({ orchestrator: null, iterations: [] });
   const [loading, setLoading] = useState(null);
-  const [phase, setPhase] = useState("idle"); // idle | running | done
+  const [phase, setPhase] = useState("idle");
   const [showConfig, setShowConfig] = useState(true);
   const [activeTab, setActiveTab] = useState(null);
+  const [currentIteration, setCurrentIteration] = useState(0);
+  const [maxIterations, setMaxIterations] = useState(() => parseInt(localStorage.getItem("max_iterations")) || 3);
+  const [savedSession, setSavedSession] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("last_session")) || null; } catch { return null; }
+  });
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem("github_token") || "");
+  const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem("github_repo") || "");
+  const [githubBranch, setGithubBranch] = useState(() => localStorage.getItem("github_branch") || "main");
+  const [githubPath, setGithubPath] = useState(() => localStorage.getItem("github_path") || "pipeline-output.md");
+  const [showGithubConfig, setShowGithubConfig] = useState(false);
+  const [commitStatus, setCommitStatus] = useState("idle");
+  const [commitUrl, setCommitUrl] = useState("");
   const bottomRef = useRef(null);
 
+  useEffect(() => { localStorage.setItem("anthropic_api_key", apiKey); }, [apiKey]);
+  useEffect(() => { localStorage.setItem("agent_ids", JSON.stringify(agentIds)); }, [agentIds]);
+  useEffect(() => { localStorage.setItem("max_iterations", String(maxIterations)); }, [maxIterations]);
+  useEffect(() => { localStorage.setItem("github_token", githubToken); }, [githubToken]);
+  useEffect(() => { localStorage.setItem("github_repo", githubRepo); }, [githubRepo]);
+  useEffect(() => { localStorage.setItem("github_branch", githubBranch); }, [githubBranch]);
+  useEffect(() => { localStorage.setItem("github_path", githubPath); }, [githubPath]);
   useEffect(() => {
-    localStorage.setItem("anthropic_api_key", apiKey);
-  }, [apiKey]);
-
+    if (phase === "running" || phase === "done")
+      localStorage.setItem("last_session", JSON.stringify({ brief, results, phase }));
+  }, [results, phase]);
   useEffect(() => {
-    localStorage.setItem("agent_ids", JSON.stringify(agentIds));
-  }, [agentIds]);
-
-  useEffect(() => {
-    if (bottomRef.current)
-      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    if (bottomRef.current) bottomRef.current.scrollIntoView({ behavior: "smooth" });
   }, [results, loading]);
 
-  async function callClaude(systemPrompt, userMessage) {
+  async function callClaude(systemPrompt, messages) {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -131,17 +134,9 @@ export default function AgentPipeline() {
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1500,
-        system: systemPrompt,
-        messages: [{ role: "user", content: userMessage }],
-      }),
+      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1500, system: systemPrompt, messages }),
     });
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error?.message || "Erreur API");
-    }
+    if (!response.ok) { const err = await response.json(); throw new Error(err.error?.message || "Erreur API"); }
     const data = await response.json();
     return data.content[0].text;
   }
@@ -149,53 +144,111 @@ export default function AgentPipeline() {
   async function runPipeline() {
     if (!apiKey || !brief.trim()) return;
     setPhase("running");
-    setResults({});
+    setResults({ orchestrator: null, iterations: [] });
+    setCurrentIteration(0);
     setShowConfig(false);
-
+    setCommitStatus("idle");
+    setCommitUrl("");
     try {
-      // Step 1: Orchestrator
-      setLoading("orchestrator");
-      setActiveTab("orchestrator");
-      const orchResult = await callClaude(
-        SYSTEM_PROMPTS.orchestrator,
-        `Brief du projet:\n${brief}`
-      );
-      setResults((r) => ({ ...r, orchestrator: orchResult }));
+      setLoading("orchestrator"); setActiveTab("orchestrator");
+      const orchResult = await callClaude(SYSTEM_PROMPTS.orchestrator, [{ role: "user", content: `Brief du projet:\n${brief}` }]);
+      setResults(r => ({ ...r, orchestrator: orchResult }));
       setLoading(null);
 
-      // Step 2: Dev
-      setLoading("dev");
-      setActiveTab("dev");
-      const devResult = await callClaude(
-        SYSTEM_PROMPTS.developer,
-        `Instructions de l'Orchestrator:\n${orchResult}`
-      );
-      setResults((r) => ({ ...r, dev: devResult }));
-      setLoading(null);
+      let devConv = [{ role: "user", content: `Instructions de l'Orchestrator:\n${orchResult}` }];
+      let qaConv = [];
+      let lastDev = "", lastQa = "", approved = false, iter = 0;
 
-      // Step 3: QA
-      setLoading("qa");
-      setActiveTab("qa");
-      const qaResult = await callClaude(
-        SYSTEM_PROMPTS.qa,
-        `Instructions de l'Orchestrator:\n${orchResult}\n\nCode du développeur:\n${devResult}`
-      );
-      setResults((r) => ({ ...r, qa: qaResult }));
-      setLoading(null);
+      while (iter < maxIterations && !approved) {
+        iter++; setCurrentIteration(iter);
+        setLoading("dev"); setActiveTab("dev");
+        lastDev = await callClaude(SYSTEM_PROMPTS.developer, devConv);
+        devConv.push({ role: "assistant", content: lastDev });
+        setResults(r => ({ ...r, iterations: [...r.iterations.slice(0, iter - 1), { dev: lastDev, qa: "" }] }));
+        setLoading(null);
 
-      setPhase("done");
+        setLoading("qa"); setActiveTab("qa");
+        if (qaConv.length === 0) qaConv = [{ role: "user", content: `Instructions Orchestrator:\n${orchResult}\n\nCode Dev:\n${lastDev}` }];
+        else qaConv.push({ role: "user", content: `Dev a révisé:\n${lastDev}\n\nRe-valide.` });
+        lastQa = await callClaude(SYSTEM_PROMPTS.qa, qaConv);
+        qaConv.push({ role: "assistant", content: lastQa });
+        setResults(r => { const its = [...r.iterations]; its[iter - 1] = { ...its[iter - 1], qa: lastQa }; return { ...r, iterations: its }; });
+        setLoading(null);
+
+        approved = lastQa.includes("APPROUVÉ");
+        if (!approved && iter < maxIterations)
+          devConv.push({ role: "user", content: `Feedback QA:\n${lastQa}\n\nCorrige les problèmes.` });
+      }
+      setCurrentIteration(0); setPhase("done");
     } catch (e) {
-      setLoading(null);
-      setPhase("idle");
-      setResults((r) => ({ ...r, error: e.message }));
+      setLoading(null); setCurrentIteration(0); setPhase("idle");
+      setResults(r => ({ ...r, error: e.message }));
     }
   }
 
+  function restoreSession() {
+    if (!savedSession) return;
+    setBrief(savedSession.brief || "");
+    setResults(savedSession.results || { orchestrator: null, iterations: [] });
+    setPhase(savedSession.phase === "done" ? "done" : "idle");
+    if (savedSession.phase === "done") setShowConfig(false);
+    setActiveTab("orchestrator");
+    setSavedSession(null);
+  }
+
+  function resetPipeline() {
+    setPhase("idle"); setResults({ orchestrator: null, iterations: [] });
+    setActiveTab(null); setShowConfig(true); setBrief("");
+    setCurrentIteration(0); setCommitStatus("idle"); setCommitUrl("");
+    localStorage.removeItem("last_session"); setSavedSession(null);
+  }
+
+  async function commitToGitHub() {
+    setCommitStatus("loading");
+    try {
+      const [owner, repo] = githubRepo.split("/");
+      const its = results.iterations || [];
+      const lastDev = its[its.length - 1]?.dev || "";
+      const lastQa = its[its.length - 1]?.qa || "";
+      const md = [`# Pipeline Output — ${new Date().toLocaleString("fr-CA")}`, "", "## Brief", brief, "", "## Orchestrator", results.orchestrator || "", "", `## Dev Agent (itération ${its.length})`, lastDev, "", "## QA Agent", lastQa].join("\n");
+      const content = btoa(unescape(encodeURIComponent(md)));
+      let sha;
+      const chk = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${githubPath}?ref=${githubBranch}`, { headers: { Authorization: `Bearer ${githubToken}` } });
+      if (chk.ok) sha = (await chk.json()).sha;
+      const body = { message: `feat: pipeline output — ${brief.slice(0, 60)}`, content, branch: githubBranch };
+      if (sha) body.sha = sha;
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${githubPath}`, { method: "PUT", headers: { Authorization: `Bearer ${githubToken}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
+      setCommitUrl((await res.json()).content.html_url);
+      setCommitStatus("success");
+    } catch { setCommitStatus("error"); }
+  }
+
+  const its = results.iterations || [];
+  const latestDev = its.filter(i => i.dev).pop()?.dev || null;
+  const latestQa = its.filter(i => i.qa).pop()?.qa || null;
   const isReady = apiKey.trim().length > 10 && brief.trim().length > 5;
+  const canCommit = githubToken.trim().length > 0 && githubRepo.includes("/");
+  const getResult = k => k === "orchestrator" ? results.orchestrator : k === "dev" ? latestDev : latestQa;
+  const hasResult = k => !!getResult(k);
 
   return (
     <div style={styles.root}>
       <style>{css}</style>
+
+      {/* Session Restore Banner */}
+      {savedSession && phase === "idle" && (
+        <div style={styles.restoreBanner}>
+          <span style={{display:"flex",alignItems:"center",gap:6}}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            Session précédente disponible
+          </span>
+          <div style={{display:"flex",gap:8}}>
+            <button style={styles.restoreBtn} onClick={restoreSession} aria-label="Restaurer la session précédente">Restaurer</button>
+            <button style={styles.ignoreBtn} onClick={() => { setSavedSession(null); localStorage.removeItem("last_session"); }} aria-label="Ignorer">Ignorer</button>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div style={styles.header}>
@@ -236,6 +289,15 @@ export default function AgentPipeline() {
               />
             </div>
           </div>
+          {/* Iterations slider */}
+          <div style={styles.sliderRow}>
+            <label htmlFor="max-iter" style={styles.labelSmall}>Itérations max Dev ↔ QA</label>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <input id="max-iter" type="range" min={1} max={5} value={maxIterations} onChange={e => setMaxIterations(parseInt(e.target.value))} style={styles.slider} aria-label={`Itérations max: ${maxIterations}`} />
+              <span style={styles.sliderValue}>{maxIterations}</span>
+            </div>
+          </div>
+
           <div style={styles.agentIds}>
             <div style={styles.labelSmall}>
               IDs des agents (optionnel — pour référence)
@@ -255,6 +317,23 @@ export default function AgentPipeline() {
                 </div>
               ))}
             </div>
+          </div>
+          {/* GitHub config */}
+          <div style={styles.githubSection}>
+            <button style={styles.githubToggle} onClick={() => setShowGithubConfig(!showGithubConfig)} aria-expanded={showGithubConfig} aria-label="Configuration GitHub">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{marginRight:6}}><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+              GitHub {showGithubConfig ? "▲" : "▼"}
+            </button>
+            {showGithubConfig && (
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
+                {[["gh-token","Token","ghp_...",githubToken,setGithubToken,"password","GitHub Personal Access Token"],["gh-repo","Repo","owner/repo",githubRepo,setGithubRepo,"text","Dépôt GitHub"],["gh-branch","Branche","main",githubBranch,setGithubBranch,"text","Branche cible"],["gh-path","Fichier","pipeline-output.md",githubPath,setGithubPath,"text","Chemin du fichier"]].map(([id,lbl,ph,val,set,type,aria]) => (
+                  <div key={id} style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={styles.labelSmall}>{lbl}</span>
+                    <input id={id} type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} style={styles.inputSmall} aria-label={aria} />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -296,19 +375,16 @@ export default function AgentPipeline() {
       {(phase === "running" || phase === "done") && (
         <div style={styles.pipelineViz}>
           {AGENTS.map((agent, i) => {
-            const isDone = !!results[agent.key];
+            const isDone = hasResult(agent.key);
             const isActive = loading === agent.key;
+            const showBadge = currentIteration > 1 && (agent.key === "dev" || agent.key === "qa") && (isActive || isDone);
             return (
               <div key={agent.key} style={styles.pipelineStep}>
                 <div
                   style={{
                     ...styles.agentBubble,
                     borderColor: agent.color,
-                    background: isActive
-                      ? `${agent.color}22`
-                      : isDone
-                      ? `${agent.color}15`
-                      : "#1a1a2e",
+                    background: isActive ? `${agent.color}22` : isDone ? `${agent.color}15` : "#1a1a2e",
                     boxShadow: isActive ? `0 0 20px ${agent.color}66` : "none",
                     cursor: isDone ? "pointer" : "default",
                   }}
@@ -319,23 +395,15 @@ export default function AgentPipeline() {
                   onKeyDown={(e) => e.key === "Enter" && isDone && setActiveTab(agent.key)}
                   className={isActive ? "pulse-border" : ""}
                 >
-                  <span style={{ ...styles.agentIcon, color: agent.color }}>
-                    {agent.icon}
-                  </span>
+                  <span style={{ ...styles.agentIcon, color: agent.color }}>{agent.icon}</span>
                   <div style={styles.agentName}>{agent.label}</div>
                   <div style={styles.agentDesc}>{agent.description}</div>
                   {isActive && <div style={styles.spinner}>⟳</div>}
-                  {isDone && (
-                    <div style={{ color: agent.color, fontSize: 18 }}>✓</div>
-                  )}
+                  {isDone && !isActive && <div style={{ color: agent.color, fontSize: 18 }}>✓</div>}
+                  {showBadge && <div style={{ ...styles.iterBadge, color: agent.color, borderColor: agent.color }}>{currentIteration}/{maxIterations}</div>}
                 </div>
                 {i < AGENTS.length - 1 && (
-                  <div
-                    style={{
-                      ...styles.arrow,
-                      color: isDone ? AGENTS[i].color : "#333",
-                    }}
-                  >
+                  <div style={{ ...styles.arrow, color: isDone ? AGENTS[i].color : "#333" }}>
                     →
                   </div>
                 )}
@@ -345,41 +413,47 @@ export default function AgentPipeline() {
         </div>
       )}
 
+      {/* Refinement indicator */}
+      {currentIteration > 1 && phase === "running" && (
+        <div style={styles.refinementBadge}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginRight:5}}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          Révision — itération {currentIteration}/{maxIterations}
+        </div>
+      )}
+
       {/* Results Tabs */}
-      {Object.keys(results).filter((k) => k !== "error").length > 0 && (
+      {(results.orchestrator || latestDev || latestQa) && (
         <div style={styles.resultsSection}>
-          <div style={styles.tabs}>
-            {AGENTS.filter((a) => results[a.key]).map((a) => (
-              <button
-                key={a.key}
-                onClick={() => setActiveTab(a.key)}
-                aria-label={`Résultats de ${a.label}`}
-                aria-selected={activeTab === a.key}
-                role="tab"
-                style={{
-                  ...styles.tab,
-                  borderBottom:
-                    activeTab === a.key
-                      ? `2px solid ${a.color}`
-                      : "2px solid transparent",
-                  color: activeTab === a.key ? a.color : "#666",
-                }}
-              >
+          <div style={styles.tabs} role="tablist">
+            {AGENTS.filter(a => hasResult(a.key)).map((a) => (
+              <button key={a.key} onClick={() => setActiveTab(a.key)} aria-label={`Résultats de ${a.label}`} aria-selected={activeTab === a.key} role="tab"
+                style={{ ...styles.tab, borderBottom: activeTab === a.key ? `2px solid ${a.color}` : "2px solid transparent", color: activeTab === a.key ? a.color : "#666" }}>
                 {a.icon} {a.label.split(" ")[0]}
               </button>
             ))}
           </div>
-          {AGENTS.filter((a) => results[a.key] && activeTab === a.key).map(
-            (a) => (
-              <div key={a.key} style={styles.resultBox}>
-                <div style={{ ...styles.resultHeader, color: a.color }}>
-                  {a.icon} {a.label}
-                </div>
-                <div style={styles.resultContent}>
-                  <TypewriterText text={results[a.key]} speed={5} />
-                </div>
+          {AGENTS.filter(a => hasResult(a.key) && activeTab === a.key).map(a => (
+            <div key={a.key} style={styles.resultBox}>
+              <div style={{ ...styles.resultHeader, color: a.color }}>
+                {a.icon} {a.label}
+                {a.key !== "orchestrator" && its.length > 0 && <span style={styles.iterLabel}>itération {its.length}</span>}
               </div>
-            )
+              <div style={styles.resultContent}><TypewriterText text={getResult(a.key)} speed={5} /></div>
+            </div>
+          ))}
+          {its.length > 1 && (
+            <details style={styles.historySection}>
+              <summary style={styles.historySummary}>Historique — {its.length} itérations</summary>
+              {its.map((it, i) => (
+                <div key={i} style={styles.historyItem}>
+                  <div style={styles.historyItemHeader}>Itération {i + 1}</div>
+                  <div style={{...styles.historyLabel, color:"#4fc3f7"}}>⌥ Dev</div>
+                  <div style={styles.historyContent}>{it.dev}</div>
+                  <div style={{...styles.historyLabel, color:"#81c784"}}>◉ QA</div>
+                  <div style={styles.historyContent}>{it.qa}</div>
+                </div>
+              ))}
+            </details>
           )}
         </div>
       )}
@@ -397,21 +471,24 @@ export default function AgentPipeline() {
         <div style={styles.doneBar} role="status">
           <span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{marginRight:6,verticalAlign:'middle',color:'#81c784'}}><polyline points="20 6 9 17 4 12"/></svg>
-            Pipeline complété — 3 agents ont collaboré avec succès !
+            Pipeline complété — {its.length} itération{its.length > 1 ? "s" : ""}
+            {latestQa?.includes("APPROUVÉ") ? " · APPROUVÉ ✓" : " · limite atteinte"}
           </span>
-          <button
-            onClick={() => {
-              setPhase("idle");
-              setResults({});
-              setActiveTab(null);
-              setShowConfig(true);
-              setBrief("");
-            }}
-            aria-label="Démarrer un nouveau brief"
-            style={styles.resetBtn}
-          >
-            Nouveau brief
-          </button>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+            {canCommit && (
+              <button onClick={commitStatus === "idle" ? commitToGitHub : undefined} disabled={commitStatus === "loading"} aria-label="Commit vers GitHub" aria-busy={commitStatus === "loading"}
+                style={{ ...styles.commitBtn, opacity: commitStatus === "loading" ? 0.6 : 1, cursor: commitStatus === "loading" ? "not-allowed" : "pointer", ...(commitStatus === "success" ? {borderColor:"#81c784",color:"#81c784"} : {}), ...(commitStatus === "error" ? {borderColor:"#ff6b6b",color:"#ff6b6b"} : {}) }}>
+                {commitStatus === "idle" && <><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style={{marginRight:5,verticalAlign:'middle'}}><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>Commit GitHub</>}
+                {commitStatus === "loading" && "⟳ Commit..."}
+                {commitStatus === "success" && "✓ Commité"}
+                {commitStatus === "error" && "✗ Échec — réessayer"}
+              </button>
+            )}
+            {commitStatus === "success" && commitUrl && (
+              <a href={commitUrl} target="_blank" rel="noopener noreferrer" style={styles.commitLink} aria-label="Voir le fichier sur GitHub">Voir sur GitHub →</a>
+            )}
+            <button onClick={resetPipeline} aria-label="Démarrer un nouveau brief" style={styles.resetBtn}>Nouveau brief</button>
+          </div>
         </div>
       )}
 
@@ -632,6 +709,60 @@ const styles = {
     fontSize: 12,
     whiteSpace: "nowrap",
     minHeight: 44,
+  },
+  restoreBanner: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "10px 24px", background: "#0a1020", borderBottom: "1px solid #1e2a4a",
+    fontSize: 12, color: "#7ab3f0", gap: 12, flexWrap: "wrap",
+  },
+  restoreBtn: {
+    background: "#1a2a4a", border: "1px solid #2a3a6a", color: "#7ab3f0",
+    padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, minHeight: 36,
+  },
+  ignoreBtn: {
+    background: "transparent", border: "1px solid #2a2a4a", color: "#555",
+    padding: "6px 12px", borderRadius: 4, cursor: "pointer", fontSize: 11, minHeight: 36,
+  },
+  sliderRow: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    marginBottom: 14, gap: 16, flexWrap: "wrap",
+  },
+  slider: { flex: 1, accentColor: "#f0a500", cursor: "pointer", maxWidth: 120 },
+  sliderValue: { color: "#f0a500", fontFamily: "monospace", fontSize: 14, fontWeight: "bold", minWidth: 16 },
+  githubSection: { marginTop: 14, borderTop: "1px solid #1e1e3a", paddingTop: 12 },
+  githubToggle: {
+    background: "transparent", border: "none", color: "#666", fontSize: 11,
+    cursor: "pointer", letterSpacing: 1, padding: "4px 0",
+    display: "flex", alignItems: "center",
+  },
+  iterBadge: {
+    fontSize: 9, border: "1px solid", borderRadius: 10,
+    padding: "1px 6px", letterSpacing: 1, marginTop: 2,
+  },
+  refinementBadge: {
+    textAlign: "center", margin: "4px 24px 0", fontSize: 11, color: "#888",
+    display: "flex", alignItems: "center", justifyContent: "center", letterSpacing: 1,
+  },
+  iterLabel: { fontSize: 10, color: "#555", letterSpacing: 1, marginLeft: 10, fontWeight: "normal" },
+  historySection: { marginTop: 8, border: "1px solid #1e1e3a", borderRadius: 6, overflow: "hidden" },
+  historySummary: {
+    padding: "10px 16px", background: "#0f0f22", cursor: "pointer",
+    fontSize: 11, color: "#555", letterSpacing: 1,
+  },
+  historyItem: { padding: "14px 16px", borderTop: "1px solid #1e1e3a", background: "#0a0a18" },
+  historyItemHeader: { fontSize: 11, fontWeight: "bold", color: "#444", letterSpacing: 2, marginBottom: 8 },
+  historyLabel: { fontSize: 10, letterSpacing: 2, marginBottom: 4, marginTop: 8 },
+  historyContent: { fontSize: 11, lineHeight: 1.7, color: "#555", whiteSpace: "pre-wrap", maxHeight: 150, overflowY: "auto" },
+  commitBtn: {
+    background: "#0a0a18", border: "1px solid #2a2a4a", color: "#aaa",
+    padding: "10px 14px", borderRadius: 4, fontSize: 12,
+    display: "flex", alignItems: "center", minHeight: 44, whiteSpace: "nowrap",
+    transition: "all 200ms ease",
+  },
+  commitLink: {
+    color: "#81c784", fontSize: 12, textDecoration: "none", padding: "10px 14px",
+    border: "1px solid #2a4a2a", borderRadius: 4, background: "#0a1a0a",
+    minHeight: 44, display: "flex", alignItems: "center",
   },
 };
 
