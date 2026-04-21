@@ -2,7 +2,7 @@
 
 Pipeline multi-agents Claude avec 3 agents en séquence : **Orchestrator → Dev Agent → QA Agent**
 
-**Live** : https://sleeplow.github.io/Agent-App/
+**Live** : https://agent.sleeplow.ca
 
 ---
 
