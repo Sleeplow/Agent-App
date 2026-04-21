@@ -9,7 +9,7 @@ Pipeline multi-agents Claude avec 3 agents en séquence : **Orchestrator → Dev
 ## Installation sur iPhone / Android
 
 ### iPhone (iOS Safari)
-1. Ouvrir l'app dans Safari : `https://sleeplow.github.io/Agent-App/`
+1. Ouvrir l'app dans Safari : `https://agent.sleeplow.ca/`
 2. Appuyer sur le bouton **Partager** (icône carré avec flèche)
 3. Sélectionner **« Sur l'écran d'accueil »**
 4. L'app s'ouvre en plein écran, sans barre Safari, comme une app native
